@@ -1852,24 +1852,22 @@ task.spawn(function()
                             task.wait(4) 
                         end
                     end
-                    
-                    if not foundMob then
-                        for _, v in pairs(replicated:GetChildren()) do
-                            if v.Name == enemyName and Attack.Alive(v) then
-                                foundMob = true
-                                _tp(v.HumanoidRootPart.CFrame * CFrame.new(0,20,0))
+                            _tp(v.HumanoidRootPart.CFrame * CFrame.new(0,20,0))
+                            Attack.Kill(v, _G.Level)
+                            
+                            if not questUI.Visible then
                                 break
                             end
-                        end
+                        until not _G.Level or not v.Parent or v.Humanoid.Health <= 0
+                        task.wait(4) 
                     end
-                    
-                    if not foundMob then
-                        for _, spawnPoint in pairs(workspace["_WorldOrigin"].EnemySpawns:GetChildren()) do
-                            if string.find(spawnPoint.Name, enemyName) then
-                                _tp(spawnPoint.CFrame * CFrame.new(0, 20, 0))
-                                break
-                            end
-                        end
+                end
+                
+                -- CHỈ CÒN LẠI ĐOẠN NÀY (ĐÃ XÓA SẠCH ĐOẠN REPLICATED VÀ SPAWNPOINT GÂY LỖI)
+                if not foundMob then
+                    task.wait(2)
+                end
+
                     end
                 end
             end)
