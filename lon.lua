@@ -1849,7 +1849,7 @@ task.spawn(function()
                                     break
                                 end
                             until not _G.Level or not v.Parent or v.Humanoid.Health <= 0
-                            task.wait(2) 
+                            task.wait(4) 
                         end
                     end
                     
