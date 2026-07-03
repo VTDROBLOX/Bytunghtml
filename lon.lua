@@ -596,7 +596,7 @@ sea2 = (game.PlaceId == 4442272183 or game.PlaceId == 79091703265657)
 sea3 = (game.PlaceId == 7449423635 or game.PlaceId == 100117331123089)
 
 local Settings = {
-    ["Tween Speed"] = 350,
+    ["Tween Speed"] = 100,
     ["Bypass Teleport"] = true,
     ["Up Y"] = false,
     ["Up Y When Low Health"] = false,
@@ -1360,105 +1360,204 @@ Tabs.Info:AddDiscordInvite({
 })
 Tabs.Info:AddSection("Status Server")
 
-Tabs.Hop:AddSection("Server Browser")
+local function createHopFunction(apiUrl, apiType, targetName)
+    return function()
+        local HttpService = game:GetService("HttpService")
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local TeleportService = game:GetService("TeleportService")
+        local Players = game:GetService("Players")
+        local Player = Players.LocalPlayer
+        
+        local Remote = ReplicatedStorage:FindFirstChild("__ServerBrowser")
+        
+        local request = (syn and syn.request)
+            or http_request
+            or request
+            or (fluxus and fluxus.request)
+            or (http and http.request)
+        
+        if not request then
+            warn("Executor doesn't support request")
+            return
+        end
+        
+        local Visited = _G.VisitedServers or {}
+        _G.VisitedServers = Visited
+        
+        local function Decode(str)
+            local ok, data = pcall(function()
+                return HttpService:JSONDecode(str)
+            end)
+            if ok then return data end
+            ok, data = pcall(function()
+                return HttpService:JSONDecode("[" .. str .. "]")
+            end)
+            if ok then return data end
+            return nil
+        end
+        
+        local function Teleport(job)
+            if Remote then
+                local ok = pcall(function()
+                    Remote:InvokeServer("teleport", job)
+                end)
+                if ok then return end
+            end
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, job, Player)
+        end
+        
+        local ok, res = pcall(function()
+            return request({
+                Url = apiUrl,
+                Method = "GET",
+                Headers = {
+                    ["User-Agent"] = "Roblox",
+                    ["Referer"] = "https://tunglietduong.teddyhubdev.workers.dev/"
+                }
+            })
+        end)
+        
+        if not ok or not res then
+            warn("Request Failed")
+            return
+        end
+        
+        local Body = Decode(res.Body)
+        if not Body then
+            warn("JSON Decode Failed")
+            print(res.Body)
+            return
+        end
+        
+        -- Xử lý dữ liệu theo từng loại API
+        local Jobs = {}
+        if apiType == "render" then
+            -- API render.com: lọc theo type
+            local server_list = Body.all_servers or Body.moon_data or Body.servers
+            if server_list and type(server_list) == "table" then
+                for _, v in ipairs(server_list) do
+                    local job = tostring(v.jobid or v.jobId or v.id or "")
+                    local isTarget = false
+                    if targetName == "Full Moon" then
+                        isTarget = v.type == "FullMoon" or (v.name and string.find(v.name, "FullMoon"))
+                    elseif targetName == "Mirage Island" then
+                        isTarget = v.type == "MirageIsland" or v.type == "Mirage" or (v.name and string.find(v.name, "Mirage"))
+                    end
+                    if #job > 10 and job ~= game.JobId and not Visited[job] and isTarget then
+                        table.insert(Jobs, job)
+                    end
+                end
+            end
+        elseif apiType == "teddy" then
+            -- API TeddyHub: lọc theo tên boss (chỉ Cursed Captain)
+            local data = Body.total or Body
+            if data and data.JobId then
+                for _, v in ipairs(data.JobId) do
+                    local job = tostring(v.JobId or v.jobid or v.id or "")
+                    local name = tostring(v.name or "")
+                    if #job > 10 and job ~= game.JobId and not Visited[job] and name:lower() == targetName:lower() then
+                        table.insert(Jobs, job)
+                    end
+                end
+            end
+        end
+        
+        if #Jobs == 0 then
+            warn("No Server Found for:", targetName)
+            Window:Notify({
+                Title = "Tay hub",
+                Content = "Không tìm thấy " .. targetName .. "!",
+                Image = "rbxassetid://96454140798208",
+                Duration = 3
+            })
+            return
+        end
+        
+        local Job = Jobs[math.random(#Jobs)]
+        Visited[Job] = true
+        print("Teleport ->", Job)
+        Window:Notify({
+            Title = "Tay hub",
+            Content = targetName .. ": " .. Job,
+            Image = "rbxassetid://96454140798208",
+            Duration = 5
+        })
+        Teleport(Job)
+    end
+end
 
--- =================== PHẦN HOP SPAM 0.1 GIÂY ===================
-local IsHopping = false
+Tabs.Hop:AddSection("")
 
-local HopToggle = Tabs.Hop:AddToggle({
+local isHoppingCursed = false
+local HopToggleCursed = Tabs.Hop:AddToggle({
+    Name = "Auto Hop Cursed Captain",
+    Description = "(lấy tộc quỷ... chỉ hoạt động ở s2)",
+    Default = false,
+    Callback = function(Value)
+        isHoppingCursed = Value
+        if isHoppingCursed then
+            print("[Hop] Bắt đầu vòng lặp tìm Cursed Captain...")
+            task.spawn(function()
+                local hopOnce = createHopFunction(
+                    "https://tunglietduong.teddyhubdev.workers.dev/",
+                    "",
+                    "cursed captain"
+                )
+                while isHoppingCursed do
+                    hopOnce()
+                    task.wait(0.1)
+                end
+                print("[Hop] Dừng tìm Cursed Captain")
+            end)
+        end
+    end
+})
+
+local isHoppingFullMoon = false
+local HopToggleFullMoon = Tabs.Hop:AddToggle({
     Name = "Auto Hop Full Moon",
     Default = false,
     Callback = function(Value)
-        IsHopping = Value
-
-        if IsHopping then
+        isHoppingFullMoon = Value
+        if isHoppingFullMoon then
             print("[Hop] Bắt đầu vòng lặp tìm Full Moon...")
             task.spawn(function()
-                local visited = _G.VisitedFullMoonServers or {}
-                _G.VisitedFullMoonServers = visited
-
-                while IsHopping do
-                    local HttpService = game:GetService("HttpService")
-                    local ReplicatedStorage = game:GetService("ReplicatedStorage")
-                    local TeleportService = game:GetService("TeleportService")
-                    local TeleportRemote = ReplicatedStorage:WaitForChild("__ServerBrowser")
-
-                    local request_fn = (syn and syn.request)
-                        or http_request
-                        or request
-                        or (fluxus and fluxus.request)
-                        or (http and http.request)
-
-                    if not request_fn then
-                        warn("[Hop] Executor không hỗ trợ request!")
-                        IsHopping = false
-                        if HopToggle and HopToggle.Set then HopToggle:Set(false) end
-                        break
-                    end
-
-                    local API = "https://api-server-clig.onrender.com/"
-                    local ok, res = pcall(function()
-                        return request_fn({
-                            Url = API,
-                            Method = "GET",
-                            Headers = {["User-Agent"] = "Roblox" }
-                        })
-                    end)
-
-                    if ok and res then
-                        local success, body = pcall(function()
-                            return HttpService:JSONDecode(res.Body)
-                        end)
-                        if success and body then
-                            local server_list = body.all_servers or body.moon_data or body.servers
-                            if server_list and type(server_list) == "table" then
-                                local full_moon_servers = {}
-                                for _, v in ipairs(server_list) do
-                                    local job = tostring(v.jobid or v.jobId or v.id or "")
-                                    local isFullMoon = v.type == "FullMoon" or (v.name and string.find(v.name, "FullMoon"))
-                                    if #job > 10 and job ~= game.JobId and not visited[job] and isFullMoon then
-                                        table.insert(full_moon_servers, job)
-                                    end
-                                end
-                                if #full_moon_servers > 0 then
-                                    local selected = full_moon_servers[math.random(1, #full_moon_servers)]
-                                    print("[Hop] Chọn server Full Moon:", selected)
-                                    visited[selected] = true
-
-                                    -- Hiển thị thông báo với jobid
-                                    Window:Notify({
-                                        Title = "Tay hub",
-                                        Content = "Đã vào server: " .. selected,
-                                        Image = "rbxassetid://96454140798208",
-                                        Duration = 5
-                                    })
-
-                                    -- Teleport
-                                    local teleport_ok = pcall(function()
-                                        TeleportRemote:InvokeServer("teleport", selected)
-                                    end)
-                                    if not teleport_ok then
-                                        pcall(function()
-                                            TeleportService:TeleportToPlaceInstance(game.PlaceId, selected, game.Players.LocalPlayer)
-                                        end)
-                                    end
-                                    print("[Hop] Đã teleport thành công!")
-                                else
-                                    print("[Hop] Chưa tìm thấy Full Moon server mới.")
-                                end
-                            end
-                        end
-                    end
-                    task.wait(0.1) -- Chờ 0.1 giây, spam cực nhanh
+                local hopOnce = createHopFunction(
+                    "https://api-server-clig.onrender.com/",
+                    "render",
+                    "Full Moon"
+                )
+                while isHoppingFullMoon do
+                    hopOnce()
+                    task.wait(0.1)
                 end
-
-                print("[Hop] Đã dừng tìm kiếm.")
-                if HopToggle and HopToggle.Set then
-                    HopToggle:Set(false)
-                end
+                print("[Hop] Dừng tìm Full Moon")
             end)
-        else
-            print("")
+        end
+    end
+})
+
+-- 3. Mirage Island - API render.com
+local isHoppingMirage = false
+local HopToggleMirage = Tabs.Hop:AddToggle({
+    Name = "Auto Hop Mirage Island",
+    Default = false,
+    Callback = function(Value)
+        isHoppingMirage = Value
+        if isHoppingMirage then
+            print("[Hop] Bắt đầu vòng lặp tìm Mirage Island...")
+            task.spawn(function()
+                local hopOnce = createHopFunction(
+                    "https://api-server-clig.onrender.com/",
+                    "render",
+                    "Mirage Island"
+                )
+                while isHoppingMirage do
+                    hopOnce()
+                    task.wait(0.1)
+                end
+                print("[Hop] Dừng tìm Mirage Island")
+            end)
         end
     end
 })
@@ -1849,25 +1948,27 @@ task.spawn(function()
                                     break
                                 end
                             until not _G.Level or not v.Parent or v.Humanoid.Health <= 0
-                            task.wait(4) 
+                            break
                         end
                     end
-                            _tp(v.HumanoidRootPart.CFrame * CFrame.new(0,20,0))
-                            Attack.Kill(v, _G.Level)
-                            
-                            if not questUI.Visible then
+                    
+                    if not foundMob then
+                        for _, v in pairs(replicated:GetChildren()) do
+                            if v.Name == enemyName and Attack.Alive(v) then
+                                foundMob = true
+                                _tp(v.HumanoidRootPart.CFrame * CFrame.new(0,20,0))
                                 break
                             end
-                        until not _G.Level or not v.Parent or v.Humanoid.Health <= 0
-                        task.wait(4) 
+                        end
                     end
-                end
-                
-                -- CHỈ CÒN LẠI ĐOẠN NÀY (ĐÃ XÓA SẠCH ĐOẠN REPLICATED VÀ SPAWNPOINT GÂY LỖI)
-                if not foundMob then
-                    task.wait(2)
-                end
-
+                    
+                    if not foundMob then
+                        for _, spawnPoint in pairs(workspace["_WorldOrigin"].EnemySpawns:GetChildren()) do
+                            if string.find(spawnPoint.Name, enemyName) then
+                                _tp(spawnPoint.CFrame * CFrame.new(0, 20, 0))
+                                break
+                            end
+                        end
                     end
                 end
             end)
@@ -3194,66 +3295,87 @@ Tabs.Main:AddToggle({
     end
 })
 
-spawn(function()
-    local player = game.Players.LocalPlayer
-    local BonesTable = {
-        "Reborn Skeleton",
-        "Living Zombie",
-        "Demonic Soul",
-        "Possessed Mummy"
-    }
-
-    while wait(0.5) do
-        if not _G.AutoFarm_Bone then continue end
-
-        pcall(function()
-            local char = player.Character
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if not root then return end
-
-           
-            local questUI =
-                player.PlayerGui:FindFirstChild("Main")
-                and player.PlayerGui.Main:FindFirstChild("Quest")
-
-            local bone = GetConnectionEnemies(BonesTable)
-
-            
-            if _G.AcceptQuestB and questUI and not questUI.Visible then
-                local questPos = CFrame.new(-9516.99316,172.01718,6078.46533)
-                _tp(questPos)
-
-                repeat wait(2)
-                until not _G.AutoFarm_Bone
-                   or (questPos.Position - root.Position).Magnitude <= 50
-
-                if not _G.AutoFarm_Bone then return end
-
-                local questData = {
-                    {"StartQuest","HauntedQuest2",2},
-                    {"StartQuest","HauntedQuest2",1},
-                    {"StartQuest","HauntedQuest1",1},
-                    {"StartQuest","HauntedQuest1",2}
-                }
-
-                game.ReplicatedStorage.Remotes.CommF_:InvokeServer(
-                    unpack(questData[math.random(1,#questData)])
-                )
-            end
-
-           
-            if bone then
-                repeat
-                    wait()
-                    Attack.Kill(bone, true)
-                until not _G.AutoFarm_Bone
-                   or not bone.Parent
-                   or bone.Humanoid.Health <= 0
-            else
-            
-                _tp(CFrame.new(-9495.6806640625, 453.58624267578125, 5977.3486328125))
-            end
-        end)
+spawn(function()        
+    while task.wait(0.3) do
+        if _G.AutoFarm_Bone then 
+            pcall(function()
+                local player = game.Players.LocalPlayer
+                -- Luôn lấy Character và Root mới nhất để khi reset nhân vật không bị đơ
+                local char = player.Character
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                if not root or char.Humanoid.Health <= 0 then return end
+                
+                local questUI = player.PlayerGui:FindFirstChild("Main") and player.PlayerGui.Main:FindFirstChild("Quest")                          
+                
+                -- 1. Học theo Farm Kẹo: Di chuyển và Đợi bay đến nơi để nhận nhiệm vụ
+                if getgenv().AcceptQuest and questUI and not questUI.Visible then
+                    local questPos = CFrame.new(-9516.99316, 172.01718, 6078.46533)
+                    
+                    _tp(questPos) -- Gọi hàm bay gốc của Ok Hub
+                    
+                    -- Khóa luồng chặn đứng việc quét quái liên tục gây giật cam/nhân vật
+                    while _G.AutoFarm_Bone and (questPos.Position - root.Position).Magnitude > 50 do
+                        task.wait(0.2)
+                    end
+                    
+                    -- Khi đã đến gần bãi nhận nhiệm vụ
+                    if (questPos.Position - root.Position).Magnitude <= 15 then
+                        local questData = {
+                            {"StartQuest","HauntedQuest2",2},
+                            {"StartQuest","HauntedQuest2",1},
+                            {"StartQuest","HauntedQuest1",1},
+                            {"StartQuest","HauntedQuest1",2}
+                        }
+                        game.ReplicatedStorage.Remotes.CommF_:InvokeServer(unpack(questData[math.random(1, #questData)]))
+                    end
+                    return
+                end
+                
+                -- 2. Quét tìm quái xương xung quanh đảo bóng đêm
+                local targetMob = nil
+                local minDist = math.huge
+                local enemies = workspace:FindFirstChild("Enemies")
+                local BonesTable = {"Reborn Skeleton", "Living Zombie", "Demonic Soul", "Possessed Mummy"}
+                if enemies then
+                    local children = enemies:GetChildren()
+                    for i = 1, #children do
+                        local v = children[i]
+                        local isBoneMob = false
+                        for j = 1, #BonesTable do
+                            if v.Name == BonesTable[j] then isBoneMob = true break end
+                        end
+                        if isBoneMob and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
+                            local dist = (v.HumanoidRootPart.Position - root.Position).Magnitude
+                            if dist < minDist then
+                                minDist = dist
+                                targetMob = v
+                            end
+                        end
+                    end
+                end
+                
+                -- 3. Di chuyển và đánh quái tuân thủ vòng lặp repeat giống Farm Kẹo
+                if targetMob then
+                    -- Bay đến quái và khóa luồng chờ bay sát bãi
+                    _tp(targetMob.HumanoidRootPart.CFrame * CFrame.new(0, 20, 0))
+                    
+                    -- Đánh quái liên tục cho đến khi quái chết hoặc tắt farm (Giống y hệt farm kẹo)
+                    repeat task.wait()
+                        -- Bật lại các biến khóa gom quái gốc của Ok Hub khi đã tiếp cận
+                        getgenv().OnFarm = true
+                        shouldTween = true
+                        Attack.Kill(targetMob, true)
+                    until not _G.AutoFarm_Bone or not targetMob.Parent or targetMob.Humanoid.Health <= 0
+                else
+                    -- Nếu hết quái thì bay về bãi chờ trung tâm và đợi
+                    local standPos = CFrame.new(-9495.68066, 453.58624, 5977.34863)
+                    _tp(standPos)
+                    while _G.AutoFarm_Bone and not workspace.Enemies:FindFirstChildOfClass("Model") and (standPos.Position - root.Position).Magnitude > 50 do
+                        task.wait(0.2)
+                    end
+                end
+            end)
+        end
     end
 end)
 
@@ -10603,7 +10725,7 @@ local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 
 local flying = false
-local flySpeed = 50
+local flySpeed = 500
 local flyConnection
 local ctrl = {f = 0, b = 0, l = 0, r = 0}
 local bg, bv
